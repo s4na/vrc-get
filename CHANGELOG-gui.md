@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog].
   - This is not supported on Wayland since the position of windows is managed by the compositor.
 
 ### Changed
+- Include connection, timeout, and OS error details when available in HTTP request errors `#3`
 - Updated GUI components to shadcn/ui New York style [`#3143`](https://github.com/vrc-get/vrc-get/pull/3143)
 - Changed license of this project to MPL-2.0 `#3231`
 - Changed how the Project List is managed `#3184`
