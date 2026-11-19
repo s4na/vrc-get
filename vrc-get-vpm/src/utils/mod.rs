@@ -68,7 +68,14 @@ impl<T> MapResultExt<T> for Result<T, reqwest::Error> {
 
                 impl std::fmt::Display for RequestCombinedErr {
                     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        write!(f, "{} ({})", self.0, self.0.source().unwrap())
+                        write!(f, "{} ({})", self.0, self.0.source().unwrap())?;
+                        if self.0.is_timeout() {
+                            write!(f, "; timeout")?;
+                        }
+                        if self.0.is_connect() {
+                            write!(f, "; connect error")?;
+                        }
+                        write!(f, "{}", SourceIoDetails(&self.0))
                     }
                 }
 
@@ -89,6 +96,60 @@ impl<T> MapResultExt<T> for Result<T, reqwest::Error> {
                 io::Error::new(io::ErrorKind::NotFound, err)
             }
         })
+    }
+}
+
+// Only include structured I/O details from nested errors. Arbitrary source
+// strings can contain URLs, credentials, or other user-supplied data.
+struct SourceIoDetails<'a>(&'a (dyn Error + 'static));
+
+impl std::fmt::Display for SourceIoDetails<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut source = self.0.source();
+        while let Some(error) = source {
+            if let Some(io_error) = error.downcast_ref::<io::Error>() {
+                write!(f, "; I/O error kind: {:?}", io_error.kind())?;
+                if let Some(code) = io_error.raw_os_error() {
+                    write!(f, ", OS error: {code}")?;
+                }
+            }
+            source = error.source();
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod request_error_tests {
+    use super::SourceIoDetails;
+    use std::error::Error;
+    use std::fmt;
+    use std::io;
+
+    #[derive(Debug)]
+    struct Wrapper(io::Error);
+
+    impl fmt::Display for Wrapper {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "private https://example.test/?token=secret")
+        }
+    }
+
+    impl Error for Wrapper {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn nested_io_details_include_os_code_without_source_text() {
+        let nested = Wrapper(io::Error::other(Wrapper(io::Error::from_raw_os_error(
+            10061,
+        ))));
+        let details = SourceIoDetails(&nested).to_string();
+        assert!(details.contains("OS error: 10061"));
+        assert!(details.contains("I/O error kind:"));
+        assert!(!details.contains("secret"));
     }
 }
 
